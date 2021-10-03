@@ -4,6 +4,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <algorithm>
 
 const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
 
@@ -46,12 +47,19 @@ void VulkanApplication::initWindow()
     m_window = glfwCreateWindow(m_width, m_height, "Vulkan window", nullptr, nullptr);
 }
 
-void VulkanApplication::run()
+void VulkanApplication::init()
 {
     this->initWindow();
     this->initVulkan();
-    this->mainLoop();
-    this->cleanup();
+}
+
+bool VulkanApplication::step()
+{
+    if (glfwWindowShouldClose(m_window)) {
+        return false;
+    }
+    glfwPollEvents();
+    return true;
 }
 
 bool VulkanApplication::checkValidationLayerSupport()
@@ -91,14 +99,8 @@ void VulkanApplication::initVulkan()
     this->createSurface();
     this->pickPhysicalDevice();
     this->createLogicalDevice();
-}
-
-void VulkanApplication::mainLoop()
-{
-    while (!glfwWindowShouldClose(m_window))
-    {
-        glfwPollEvents();
-    }
+    this->createSwapChain();
+    this->createGraphicsPipeline();
 }
 
 VkResult VulkanApplication::createDebugUtilsMessengerEXT(VkInstance instance,
@@ -129,6 +131,12 @@ void VulkanApplication::destroyDebugUtilsMessengerEXT(
 
 void VulkanApplication::cleanup()
 {
+    m_graphicsPipeline->cleanup();
+    for (auto imageView : m_swapChainImageViews)
+    {
+        vkDestroyImageView(m_device, imageView, nullptr);
+    }
+    vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
     vkDestroyDevice(m_device, nullptr);
 
     if (enableValidationLayers)
@@ -207,15 +215,15 @@ void VulkanApplication::checkGLFWExtensions(
 
 void VulkanApplication::createInstance()
 {
-
+    // This is a safety check to ensure validation layers are available
+    // when requested.
     if (enableValidationLayers && !checkValidationLayerSupport())
     {
         throw std::runtime_error("validation layers requested, but not available!");
     }
 
-
     m_appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    m_appInfo.pApplicationName = "Hello Triangle";
+    m_appInfo.pApplicationName = "Vulkan Tutorial Application";
     m_appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     m_appInfo.pEngineName = "No Engine";
     m_appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -346,7 +354,8 @@ void VulkanApplication::createLogicalDevice()
 
     createInfo.pEnabledFeatures = &deviceFeatures;
 
-    createInfo.enabledExtensionCount = 0;
+    createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+    createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
     if (enableValidationLayers)
     {
@@ -357,6 +366,7 @@ void VulkanApplication::createLogicalDevice()
     {
         createInfo.enabledLayerCount = 0;
     }
+
 
     if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) != VK_SUCCESS)
     {
@@ -430,7 +440,219 @@ bool VulkanApplication::isDeviceSuitable(VkPhysicalDevice device)
     QueueFamilyIndices indices = this->findQueueFamilies(device);
     // return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
     //	deviceFeatures.geometryShader;
-
     bool extensionsSupported = this->checkDeviceExtensionSupport(device);
-    return indices.isComplete();
+    bool swapChainAdequate = false;
+    if (extensionsSupported)
+    {
+        SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+        swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+    }
+
+    return indices.isComplete() && extensionsSupported && swapChainAdequate;
+}
+
+VkSurfaceFormatKHR VulkanApplication::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
+{
+    for (const auto& availableFormat : availableFormats)
+    {
+        if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
+            availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+        {
+            return availableFormat;
+        }
+    }
+
+    return availableFormats[0];
+}
+
+VkPresentModeKHR VulkanApplication::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes)
+{
+    for (const auto& availablePresentMode : availablePresentModes)
+    {
+        if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR)
+        {
+            return availablePresentMode;
+        }
+    }
+
+    return VK_PRESENT_MODE_FIFO_KHR;
+}
+
+VkExtent2D VulkanApplication::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities)
+{
+    if (capabilities.currentExtent.width != UINT32_MAX)
+    {
+        return capabilities.currentExtent;
+    }
+    else
+    {
+        int width, height;
+        glfwGetFramebufferSize(m_window, &width, &height);
+
+        VkExtent2D actualExtent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
+
+        actualExtent.width =
+            std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+        actualExtent.height =
+            std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+        return actualExtent;
+    }
+}
+
+SwapChainSupportDetails VulkanApplication::querySwapChainSupport(VkPhysicalDevice device)
+{
+    SwapChainSupportDetails details;
+
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_surface, &details.capabilities);
+
+    uint32_t formatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCount, nullptr);
+
+    if (formatCount != 0)
+    {
+        details.formats.resize(formatCount);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCount, details.formats.data());
+    }
+
+    uint32_t presentModeCount;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCount, nullptr);
+
+    if (presentModeCount != 0)
+    {
+        details.presentModes.resize(presentModeCount);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCount, details.presentModes.data());
+    }
+
+    return details;
+}
+
+void VulkanApplication::createSwapChain()
+{
+    SwapChainSupportDetails swapChainSupport = querySwapChainSupport(m_physicalDevice);
+
+    VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+    VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+    VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+
+    uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+    if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
+    {
+        imageCount = swapChainSupport.capabilities.maxImageCount;
+    }
+
+    VkSwapchainCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.surface = m_surface;
+
+    createInfo.minImageCount = imageCount;
+    createInfo.imageFormat = surfaceFormat.format;
+    createInfo.imageColorSpace = surfaceFormat.colorSpace;
+    createInfo.imageExtent = extent;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+    QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+    uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+    if (indices.graphicsFamily != indices.presentFamily)
+    {
+        createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        createInfo.queueFamilyIndexCount = 2;
+        createInfo.pQueueFamilyIndices = queueFamilyIndices;
+    }
+    else
+    {
+        createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        createInfo.queueFamilyIndexCount = 0;     // Optional
+        createInfo.pQueueFamilyIndices = nullptr; // Optional
+    }
+
+    createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode = presentMode;
+    createInfo.clipped = VK_TRUE;
+
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+    if (vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapChain) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create swap chain!");
+    }
+
+    vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
+    m_swapChainImages.resize(imageCount);
+    vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, m_swapChainImages.data());
+
+    m_swapChainImageFormat = surfaceFormat.format;
+    m_swapChainExtent = extent;
+}
+
+void VulkanApplication::createImageViews()
+{
+    for (size_t i = 0; i < m_swapChainImages.size(); i++)
+    {
+        VkImageViewCreateInfo createInfo{};
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.image = m_swapChainImages[i];
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = m_swapChainImageFormat;
+
+        // The components field allows you to swizzle the color channels around.
+        // For example, you can map all of the channels to the red channel for a monochrome
+        // texture. You can also map constant values of 0 and 1 to a channel.
+        // In our case we'll stick to the default mapping.
+        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+        // The subresourceRange field describes what the image's purpose is and which part of the
+        // image should be accessed. Our images will be used as color targets without any mipmapping
+        // levels or multiple layers.
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(m_device, &createInfo, nullptr, &m_swapChainImageViews[i]) != VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create image views!");
+        }
+    }
+}
+
+void VulkanApplication::createGraphicsPipeline()
+{
+    m_graphicsPipeline.reset(new GraphicsPipeline(m_device));
+    m_graphicsPipeline->init(m_swapChainExtent.width, m_swapChainExtent.height);
+}
+
+void VulkanApplication::createRenderPass()
+{
+    // Before we can finish creating the pipeline, we need to tell Vulkan about the framebuffer attachments that will
+    // be used while rendering. We need to specify how many color and depth buffers there will be, how many samples
+    // to use for each of them and how their contents should be handled throughout the rendering operations. All of
+    // this information is wrapped in a render pass object, for which we'll create a new createRenderPass function.
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = m_swapChainImageFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    // The loadOp and storeOp determine what to do with the data in the attachment before rendering and after rendering.
+    // We have the following choices for loadOp:
+    //      VK_ATTACHMENT_LOAD_OP_LOAD: Preserve the existing contents of the attachment
+    //      VK_ATTACHMENT_LOAD_OP_CLEAR: Clear the values to a constant at the start
+    //      VK_ATTACHMENT_LOAD_OP_DONT_CARE : Existing contents are undefined; we don't care about them
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+
+    //There are only two possibilities for the storeOp:
+    //      VK_ATTACHMENT_STORE_OP_STORE: Rendered contents will be stored in memory and can be read later
+    //      VK_ATTACHMENT_STORE_OP_DONT_CARE: Contents of the framebuffer will be undefined after the rendering operation
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 }

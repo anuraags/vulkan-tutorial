@@ -155,14 +155,21 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="GraphicsPipeline.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="VulkanApplication.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="GraphicsPipeline.h" />
     <ClInclude Include="VulkanApplication.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".clang-format" />
+    <None Include="shaders\compile.bat" />
+    <None Include="shaders\frag.spv" />
+    <None Include="shaders\shader.frag" />
+    <None Include="shaders\shader.vert" />
+    <None Include="shaders\vert.spv" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

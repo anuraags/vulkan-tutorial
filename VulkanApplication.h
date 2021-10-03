@@ -7,6 +7,9 @@
 
 #include <vector>
 #include <optional>
+#include <memory>
+
+#include "GraphicsPipeline.h"
 
 
 struct QueueFamilyIndices
@@ -21,6 +24,13 @@ struct QueueFamilyIndices
 };
 
 
+struct SwapChainSupportDetails
+{
+    VkSurfaceCapabilitiesKHR capabilities;
+    std::vector<VkSurfaceFormatKHR> formats;
+    std::vector<VkPresentModeKHR> presentModes;
+};
+
 class VulkanApplication
 {
 private:
@@ -28,6 +38,9 @@ private:
     int m_height;
     VkApplicationInfo m_appInfo;
     GLFWwindow* m_window;
+    /**
+     * The connection between the application and the vulkan library.
+     */
     VkInstance m_instance;
     VkDebugUtilsMessengerEXT m_debugMessenger;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
@@ -36,25 +49,37 @@ private:
     VkQueue m_presentQueue;
     VkSurfaceKHR m_surface;
 
+    VkSwapchainKHR m_swapChain;
+    std::vector<VkImage> m_swapChainImages;
+    VkFormat m_swapChainImageFormat;
+    VkExtent2D m_swapChainExtent;
+    std::vector<VkImageView> m_swapChainImageViews;
+
+    std::shared_ptr<GraphicsPipeline> m_graphicsPipeline;
+
 public:
     VulkanApplication(const char* name, int width, int height);
     void run();
+    void init();
+    bool step();
+    void cleanup();
 
 private:
     bool checkValidationLayerSupport();
     /**
      * Initialise the GLFW window system.
      */
-    void init();
-    void cleanup();
     void initWindow();
     void initVulkan();
-    void mainLoop();
     void createInstance();
     void setupDebugMessenger();
     void createSurface();
     void pickPhysicalDevice();
     void createLogicalDevice();
+    void createSwapChain();
+    void createImageViews();
+    void createGraphicsPipeline();
+    void createRenderPass();
 
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
     std::vector<const char*> getRequiredGLFWExtensions();
@@ -67,4 +92,8 @@ private:
         const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger);
     bool checkDeviceExtensionSupport(VkPhysicalDevice device);
     bool isDeviceSuitable(VkPhysicalDevice device);
+    SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
+    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+    VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
+    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
 };

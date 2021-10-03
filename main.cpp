@@ -11,7 +11,9 @@ int main() {
     VulkanApplication app("Vulkan Application", 800, 600);
 
 	try {
-		app.run();
+        app.init();
+        while (app.step()) {};
+        app.cleanup();
 	}
 	catch (const std::exception& e) {
 		std::cerr << e.what() << std::endl;
